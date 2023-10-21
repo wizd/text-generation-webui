@@ -1,5 +1,6 @@
 import json
 import os
+import ssl
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
@@ -25,9 +26,15 @@ import speech_recognition as sr
 from pydub import AudioSegment
 
 params = {
-    'port': int(os.environ.get('OPENEDAI_PORT')) if 'OPENEDAI_PORT' in os.environ else 5001,
+    # default params
+    'port': 5001,
+    'embedding_device': 'cpu',
+    'embedding_model': 'all-mpnet-base-v2',
+    
+    # optional params
+    'sd_webui_url': '',
+    'debug': 0
 }
-
 
 class Handler(BaseHTTPRequestHandler):
     def send_access_control_headers(self):
@@ -121,7 +128,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path.startswith('/v1/engines') or self.path.startswith('/v1/models'):
             is_legacy = 'engines' in self.path
-            is_list = self.path in ['/v1/engines', '/v1/models']
+            is_list = self.path.split('?')[0].split('#')[0] in ['/v1/engines', '/v1/models']
             if is_legacy and not is_list:
                 model_name = self.path[self.path.find('/v1/engines/') + len('/v1/engines/'):]
                 resp = OAImodels.load_model(model_name)
@@ -251,7 +258,7 @@ class Handler(BaseHTTPRequestHandler):
             self.return_json(response)
 
         elif '/images/generations' in self.path:
-            if 'SD_WEBUI_URL' not in os.environ:
+            if not os.environ.get('SD_WEBUI_URL', params.get('sd_webui_url', '')):
                 raise ServiceUnavailableError("Stable Diffusion not available. SD_WEBUI_URL not set.")
 
             prompt = body['prompt']
@@ -313,18 +320,31 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run_server():
-    server_addr = ('0.0.0.0' if shared.args.listen else '127.0.0.1', params['port'])
+    port = int(os.environ.get('OPENEDAI_PORT', params.get('port', 5001)))
+    server_addr = ('0.0.0.0' if shared.args.listen else '127.0.0.1', port)
     server = ThreadingHTTPServer(server_addr, Handler)
+    
+    ssl_certfile=os.environ.get('OPENEDAI_CERT_PATH', shared.args.ssl_certfile)
+    ssl_keyfile=os.environ.get('OPENEDAI_KEY_PATH', shared.args.ssl_keyfile)
+    ssl_verify=True if (ssl_keyfile and ssl_certfile) else False
+    if ssl_verify:        
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(ssl_certfile, ssl_keyfile)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        
     if shared.args.share:
         try:
             from flask_cloudflared import _run_cloudflared
-            public_url = _run_cloudflared(params['port'], params['port'] + 1)
+            public_url = _run_cloudflared(port, port + 1)
             print(f'OpenAI compatible API ready at: OPENAI_API_BASE={public_url}/v1')
         except ImportError:
             print('You should install flask_cloudflared manually')
     else:
-        print(f'OpenAI compatible API ready at: OPENAI_API_BASE=http://{server_addr[0]}:{server_addr[1]}/v1')
-
+        if ssl_verify:
+            print(f'OpenAI compatible API ready at: OPENAI_API_BASE=https://{server_addr[0]}:{server_addr[1]}/v1')
+        else:
+            print(f'OpenAI compatible API ready at: OPENAI_API_BASE=http://{server_addr[0]}:{server_addr[1]}/v1')
+    
     server.serve_forever()
 
 

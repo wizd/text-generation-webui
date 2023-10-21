@@ -1,5 +1,6 @@
 import cgi
 import json
+import ssl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 from threading import Thread
@@ -16,6 +17,7 @@ from modules.text_generation import (
     stop_everything_event
 )
 from modules.utils import get_available_models
+from modules.logging_colors import logger
 from extensions.api.audiox import transcribe_align_diarize
 
 
@@ -246,11 +248,19 @@ class Handler(BaseHTTPRequestHandler):
 
 def _run_server(port: int, share: bool = False, tunnel_id=str):
     address = '0.0.0.0' if shared.args.listen else '127.0.0.1'
-
     server = ThreadingHTTPServer((address, port), Handler)
 
+    ssl_certfile = shared.args.ssl_certfile
+    ssl_keyfile = shared.args.ssl_keyfile
+    ssl_verify = True if (ssl_keyfile and ssl_certfile) else False
+    if ssl_verify:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(ssl_certfile, ssl_keyfile)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+
     def on_start(public_url: str):
-        print(f'Starting non-streaming server at public url {public_url}/api')
+        logger.info(
+            f'Starting non-streaming server at public url {public_url}/api')
 
     if share:
         try:
@@ -259,8 +269,10 @@ def _run_server(port: int, share: bool = False, tunnel_id=str):
         except Exception:
             pass
     else:
-        print(
-            f'Starting API at http://{address}:{port}/api')
+        if ssl_verify:
+            logger.info(f'Starting API at https://{address}:{port}/api')
+        else:
+            logger.info(f'Starting API at http://{address}:{port}/api')
 
     server.serve_forever()
 
