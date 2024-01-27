@@ -5,6 +5,7 @@ import os
 import traceback
 from threading import Thread
 
+import tempfile
 import speech_recognition as sr
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -167,16 +168,24 @@ async def handle_audio_transcription(request: Request):
 
     form = await request.form()
     audio_file = await form["file"].read()
-    audio_data = AudioSegment.from_file(audio_file)
+
+    # 创建一个临时文件
+    temp = tempfile.NamedTemporaryFile(delete=False)
+
+    # 将音频数据写入临时文件
+    temp.write(audio_file)
+    temp.close()
+
+    # 现在你可以使用临时文件的路径
+    audio_data = AudioSegment.from_file(temp.name)
 
     # Convert AudioSegment to raw data
     raw_data = audio_data.raw_data
 
     # Create AudioData object
     audio_data = sr.AudioData(raw_data, audio_data.frame_rate, audio_data.sample_width)
-    whisper_language = form.getvalue('language', None)
-    whisper_model = form.getvalue('model', 'tiny')  # Use the model from the form data if it exists, otherwise default to tiny
-
+    whisper_language = form.get('language', 'Chinese')
+    whisper_model = form.get('model', 'tiny')
     transcription = {"text": ""}
 
     try:

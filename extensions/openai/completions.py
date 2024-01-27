@@ -86,6 +86,9 @@ def convert_logprobs_to_tiktoken(model, logprobs):
 
 
 def process_parameters(body, is_legacy=False):
+    if 'temperature' in body and body['temperature'] == 0:
+        print("set temperature to 0.1")
+        body['temperature'] = 0.1
     generate_params = body
     max_tokens_str = 'length' if is_legacy else 'max_tokens'
     generate_params['max_new_tokens'] = body.pop(max_tokens_str)

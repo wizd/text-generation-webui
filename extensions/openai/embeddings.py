@@ -6,7 +6,9 @@ from transformers import AutoModel
 from extensions.openai.errors import ServiceUnavailableError
 from extensions.openai.utils import debug_msg, float_list_to_base64
 from modules.logging_colors import logger
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
+max_seq_length = 8192
 embeddings_params_initialized = False
 
 
@@ -39,12 +41,24 @@ def load_embedding_model(model: str):
         raise ModuleNotFoundError
 
     initialize_embedding_params()
-    global embeddings_device, embeddings_model
+    global embeddings_device, embeddings_model, tokenizer
+    if embeddings_model is not None:
+        print("Embedding model already loaded.")
+        return  # 如果模型已经加载，直接返回
+
     try:
         print(f"Try embedding model: {model} on {embeddings_device}")
         if 'jina-embeddings' in model:
             embeddings_model = AutoModel.from_pretrained(model, trust_remote_code=True)  # trust_remote_code is needed to use the encode method
             embeddings_model = embeddings_model.to(embeddings_device)
+        elif 'm2-bert-80M-8k-retrieval' in model:
+            embeddings_model = AutoModelForSequenceClassification.from_pretrained(
+                    "togethercomputer/m2-bert-80M-8k-retrieval",
+                    trust_remote_code=True
+                ).to(embeddings_device)
+            #print("loaded embedding model")
+            tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased", model_max_length=max_seq_length)
+            #print("loaded tokenizer", tokenizer)
         else:
             embeddings_model = SentenceTransformer(model, device=embeddings_device)
 
@@ -72,7 +86,29 @@ def get_embeddings_model_name() -> str:
 def get_embeddings(input: list) -> np.ndarray:
     model = get_embeddings_model()
     debug_msg(f"embedding model : {model}")
-    embedding = model.encode(input, convert_to_numpy=True, normalize_embeddings=True, convert_to_tensor=False)
+
+    if 'm2-bert-80M-8k-retrieval' in st_model:
+        input_ids = tokenizer(
+            input,
+            return_tensors="pt",
+            padding="max_length",
+            return_token_type_ids=False,
+            truncation=True,
+            max_length=max_seq_length
+        )
+        input_ids = {name: tensor.to(embeddings_device) for name, tensor in input_ids.items()}
+        
+        outputs = model(**input_ids)
+        embedding = outputs['sentence_embedding']
+    elif 'bge' in st_model:
+        # 添加指令到输入
+        instruction = "为这个句子生成表示以用于检索相关文章："
+        input_with_instruction = [instruction + i for i in input]
+        embedding = model.encode(input_with_instruction, convert_to_numpy=True, normalize_embeddings=True, convert_to_tensor=False)
+
+    else:
+        embedding = model.encode(input, convert_to_numpy=True, normalize_embeddings=True, convert_to_tensor=False)
+    
     debug_msg(f"embedding result : {embedding}")  # might be too long even for debug, use at you own will
     return embedding
 
