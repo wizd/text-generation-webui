@@ -5,4 +5,4 @@ tiktoken
 soundfile
 openai-whisper
 opt-einsum
-SentenceTransformer
+sentence-transformers
