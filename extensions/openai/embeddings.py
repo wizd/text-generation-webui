@@ -48,10 +48,7 @@ def load_embedding_model(model: str):
 
     try:
         print(f"Try embedding model: {model} on {embeddings_device}")
-        if 'jina-embeddings' in model:
-            embeddings_model = AutoModel.from_pretrained(model, trust_remote_code=True)  # trust_remote_code is needed to use the encode method
-            embeddings_model = embeddings_model.to(embeddings_device)
-        elif 'm2-bert-80M-8k-retrieval' in model:
+        if 'm2-bert-80M-8k-retrieval' in model:
             embeddings_model = AutoModelForSequenceClassification.from_pretrained(
                     "togethercomputer/m2-bert-80M-8k-retrieval",
                     trust_remote_code=True
@@ -60,7 +57,8 @@ def load_embedding_model(model: str):
             tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased", model_max_length=max_seq_length)
             #print("loaded tokenizer", tokenizer)
         else:
-            embeddings_model = SentenceTransformer(model, device=embeddings_device)
+            embeddings_model = SentenceTransformer(model, device=embeddings_device, trust_remote_code=True)
+            embeddings_model.max_seq_length = 2048
 
         print(f"Loaded embedding model: {model}")
     except Exception as e:
