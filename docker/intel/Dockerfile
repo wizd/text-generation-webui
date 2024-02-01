@@ -8,15 +8,14 @@ ARG APP_GID="${APP_GID:-6972}"
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,rw \
     apt update && \
-    apt install --no-install-recommends -y git vim build-essential python3-dev pip bash curl ffmpeg && \
+    apt install --no-install-recommends -y git vim build-essential python3-dev pip bash curl && \
     rm -rf /var/lib/apt/lists/*
 WORKDIR /home/app/
 RUN git clone https://github.com/oobabooga/text-generation-webui.git 
 WORKDIR /home/app/text-generation-webui
-RUN GPU_CHOICE=A USE_CUDA118=FALSE LAUNCH_AFTER_INSTALL=FALSE INSTALL_EXTENSIONS=TRUE ./start_linux.sh --verbose
+RUN GPU_CHOICE=D USE_CUDA118=FALSE LAUNCH_AFTER_INSTALL=FALSE INSTALL_EXTENSIONS=TRUE ./start_linux.sh --verbose
 COPY CMD_FLAGS.txt /home/app/text-generation-webui/
-RUN pip3 install -r extensions/openai/requirements.txt
 EXPOSE ${CONTAINER_PORT:-7860} ${CONTAINER_API_PORT:-5000} ${CONTAINER_API_STREAM_PORT:-5005}
-WORKDIR /home/app/text-generation-webui
 # set umask to ensure group read / write at runtime
+WORKDIR /home/app/text-generation-webui
 CMD umask 0002 && export HOME=/home/app/text-generation-webui && ./start_linux.sh
