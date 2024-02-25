@@ -7,8 +7,9 @@ from extensions.openai.errors import ServiceUnavailableError
 from extensions.openai.utils import debug_msg, float_list_to_base64
 from modules.logging_colors import logger
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from FlagEmbedding import BGEM3FlagModel
 
-max_seq_length = 8192
+max_seq_length = 2048
 embeddings_params_initialized = False
 
 
@@ -48,7 +49,11 @@ def load_embedding_model(model: str):
 
     try:
         print(f"Try embedding model: {model} on {embeddings_device}")
-        if 'm2-bert-80M-8k-retrieval' in model:
+        if 'beg-m3' in model:
+            embeddings_model = BGEM3FlagModel(model,  
+                       use_fp16=True) # Setting use_fp16 to True speeds up computation with a slight performance degradation
+
+        elif 'm2-bert-80M-8k-retrieval' in model:
             embeddings_model = AutoModelForSequenceClassification.from_pretrained(
                     "togethercomputer/m2-bert-80M-8k-retrieval",
                     trust_remote_code=True
@@ -85,6 +90,14 @@ def get_embeddings(input: list) -> np.ndarray:
     model = get_embeddings_model()
     debug_msg(f"embedding model : {model}")
 
+    print("embedding", input, "using", model)
+
+    if 'bge-m3' in st_model:
+        outputs = model.encode(input, 
+                            batch_size=12,
+                            #max_length=2048, # If you don't need such a long length, you can set a smaller value to speed up the encoding process.
+                            )
+        embedding = outputs #['dense_vecs']
     if 'm2-bert-80M-8k-retrieval' in st_model:
         input_ids = tokenizer(
             input,
