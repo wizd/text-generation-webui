@@ -50,17 +50,17 @@ def load_embedding_model(model: str):
     try:
         print(f"Try embedding model: {model} on {embeddings_device}")
         if 'beg-m3' in model:
-            embeddings_model = BGEM3FlagModel(model,  
-                       use_fp16=True) # Setting use_fp16 to True speeds up computation with a slight performance degradation
+            embeddings_model = BGEM3FlagModel(model,
+                                              use_fp16=True)  # Setting use_fp16 to True speeds up computation with a slight performance degradation
 
         elif 'm2-bert-80M-8k-retrieval' in model:
             embeddings_model = AutoModelForSequenceClassification.from_pretrained(
-                    "togethercomputer/m2-bert-80M-8k-retrieval",
-                    trust_remote_code=True
-                ).to(embeddings_device)
-            #print("loaded embedding model")
+                "togethercomputer/m2-bert-80M-8k-retrieval",
+                trust_remote_code=True
+            ).to(embeddings_device)
+            # print("loaded embedding model")
             tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased", model_max_length=max_seq_length)
-            #print("loaded tokenizer", tokenizer)
+            # print("loaded tokenizer", tokenizer)
         else:
             embeddings_model = SentenceTransformer(model, device=embeddings_device, trust_remote_code=True)
             embeddings_model.max_seq_length = 2048
@@ -93,12 +93,12 @@ def get_embeddings(input: list) -> np.ndarray:
     print("embedding", input, "using", model)
 
     if 'bge-m3' in st_model:
-        outputs = model.encode(input, 
-                            batch_size=12,
-                            #max_length=2048, # If you don't need such a long length, you can set a smaller value to speed up the encoding process.
-                            )
-        embedding = outputs #['dense_vecs']
-    if 'm2-bert-80M-8k-retrieval' in st_model:
+        outputs = model.encode(input,
+                               batch_size=12,
+                               # max_length=2048, # If you don't need such a long length, you can set a smaller value to speed up the encoding process.
+                               )
+        embedding = outputs  # ['dense_vecs']
+    elif 'm2-bert-80M-8k-retrieval' in st_model:
         input_ids = tokenizer(
             input,
             return_tensors="pt",
@@ -108,7 +108,7 @@ def get_embeddings(input: list) -> np.ndarray:
             max_length=max_seq_length
         )
         input_ids = {name: tensor.to(embeddings_device) for name, tensor in input_ids.items()}
-        
+
         outputs = model(**input_ids)
         embedding = outputs['sentence_embedding']
     elif 'bge' in st_model:
@@ -119,7 +119,7 @@ def get_embeddings(input: list) -> np.ndarray:
 
     else:
         embedding = model.encode(input, convert_to_numpy=True, normalize_embeddings=True, convert_to_tensor=False)
-    
+
     debug_msg(f"embedding result : {embedding}")  # might be too long even for debug, use at you own will
     return embedding
 
