@@ -13,6 +13,7 @@ import transformers
 from transformers import LogitsProcessorList, is_torch_xpu_available
 
 import modules.shared as shared
+from modules.cache_utils import process_llamacpp_cache
 from modules.callbacks import (
     Iteratorize,
     Stream,
@@ -286,7 +287,7 @@ def get_reply_from_output_ids(output_ids, state=None, starting_from=0):
 
 def generate_reply_HF(question, original_question, seed, state, stopping_strings=None, is_chat=False):
     generate_params = {}
-    for k in ['max_new_tokens', 'temperature', 'temperature_last', 'dynamic_temperature', 'dynatemp_low', 'dynatemp_high', 'dynatemp_exponent', 'smoothing_factor', 'top_p', 'min_p', 'top_k', 'repetition_penalty', 'presence_penalty', 'frequency_penalty', 'repetition_penalty_range', 'typical_p', 'tfs', 'top_a', 'guidance_scale', 'penalty_alpha', 'mirostat_mode', 'mirostat_tau', 'mirostat_eta', 'do_sample', 'encoder_repetition_penalty', 'no_repeat_ngram_size', 'min_length', 'num_beams', 'length_penalty', 'early_stopping']:
+    for k in ['max_new_tokens', 'temperature', 'temperature_last', 'dynamic_temperature', 'dynatemp_low', 'dynatemp_high', 'dynatemp_exponent', 'smoothing_factor', 'smoothing_curve', 'top_p', 'min_p', 'top_k', 'repetition_penalty', 'presence_penalty', 'frequency_penalty', 'repetition_penalty_range', 'typical_p', 'tfs', 'top_a', 'guidance_scale', 'penalty_alpha', 'mirostat_mode', 'mirostat_tau', 'mirostat_eta', 'do_sample', 'encoder_repetition_penalty', 'no_repeat_ngram_size', 'min_length', 'num_beams', 'length_penalty', 'early_stopping']:
         if k in state:
             generate_params[k] = state[k]
 
@@ -363,6 +364,12 @@ def generate_reply_HF(question, original_question, seed, state, stopping_strings
         logger.info("PROMPT=")
         print(decode(input_ids[0], skip_special_tokens=False))
         print()
+
+    # Handle StreamingLLM for llamacpp_HF
+    if shared.model.__class__.__name__ == 'LlamacppHF' and shared.args.streaming_llm:
+        tmp = process_llamacpp_cache(shared.model.model, input_ids[-1].tolist(), shared.model.model._input_ids.tolist())
+        shared.model.past_seq = torch.tensor(tmp)
+        shared.model.save_cache()
 
     t0 = time.time()
     try:
