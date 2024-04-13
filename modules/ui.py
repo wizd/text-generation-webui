@@ -117,7 +117,6 @@ def list_interface_input_elements():
         'max_new_tokens',
         'auto_max_new_tokens',
         'max_tokens_second',
-        'max_updates_second',
         'prompt_lookup_num_tokens',
         'seed',
         'temperature',
@@ -140,12 +139,8 @@ def list_interface_input_elements():
         'repetition_penalty_range',
         'encoder_repetition_penalty',
         'no_repeat_ngram_size',
-        'min_length',
         'do_sample',
         'penalty_alpha',
-        'num_beams',
-        'length_penalty',
-        'early_stopping',
         'mirostat_mode',
         'mirostat_tau',
         'mirostat_eta',
@@ -238,14 +233,16 @@ def save_settings(state, preset, extensions_list, show_controls, theme_state):
 
     # Save extension values in the UI
     for extension_name in extensions_list:
-        extension = getattr(extensions, extension_name).script
-        if hasattr(extension, 'params'):
-            params = getattr(extension, 'params')
-            for param in params:
-                _id = f"{extension_name}-{param}"
-                # Only save if different from default value
-                if param not in shared.default_settings or params[param] != shared.default_settings[param]:
-                    output[_id] = params[param]
+        extension = getattr(extensions, extension_name, None)
+        if extension:
+            extension = extension.script
+            if hasattr(extension, 'params'):
+                params = getattr(extension, 'params')
+                for param in params:
+                    _id = f"{extension_name}-{param}"
+                    # Only save if different from default value
+                    if param not in shared.default_settings or params[param] != shared.default_settings[param]:
+                        output[_id] = params[param]
 
     # Do not save unchanged settings
     for key in list(output.keys()):

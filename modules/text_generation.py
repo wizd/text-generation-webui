@@ -10,7 +10,11 @@ import traceback
 import numpy as np
 import torch
 import transformers
-from transformers import LogitsProcessorList, is_torch_xpu_available
+from transformers import (
+    LogitsProcessorList,
+    is_torch_npu_available,
+    is_torch_xpu_available
+)
 
 import modules.shared as shared
 from modules.cache_utils import process_llamacpp_cache
@@ -22,9 +26,9 @@ from modules.callbacks import (
 from modules.extensions import apply_extensions
 from modules.grammar.grammar_utils import initialize_grammar
 from modules.grammar.logits_process import GrammarConstrainedLogitsProcessor
-from modules.html_generator import generate_4chan_html, generate_basic_html
+from modules.html_generator import generate_basic_html
 from modules.logging_colors import logger
-from modules.models import clear_torch_cache, local_rank
+from modules.models import clear_torch_cache
 
 
 def generate_reply(*args, **kwargs):
@@ -46,7 +50,7 @@ def _generate_reply(question, state, stopping_strings=None, is_chat=False, escap
             yield ''
             return
 
-        if shared.model.__class__.__name__ in ['LlamaCppModel', 'Exllamav2Model', 'CtransformersModel']:
+        if shared.model.__class__.__name__ in ['LlamaCppModel', 'Exllamav2Model']:
             generate_func = generate_reply_custom
         else:
             generate_func = generate_reply_HF
@@ -81,19 +85,16 @@ def _generate_reply(question, state, stopping_strings=None, is_chat=False, escap
         state = copy.deepcopy(state)
         state['stream'] = True
 
-    min_update_interval = 0
-    if state.get('max_updates_second', 0) > 0:
-        min_update_interval = 1 / state['max_updates_second']
-
     # Generate
     for reply in generate_func(question, original_question, seed, state, stopping_strings, is_chat=is_chat):
         reply, stop_found = apply_stopping_strings(reply, all_stop_strings)
         if escape_html:
             reply = html.escape(reply)
+
         if is_stream:
             cur_time = time.time()
 
-            # Maximum number of tokens/second
+            # Limit number of tokens/second to make text readable in real time
             if state['max_tokens_second'] > 0:
                 diff = 1 / state['max_tokens_second'] - (cur_time - last_update)
                 if diff > 0:
@@ -101,13 +102,8 @@ def _generate_reply(question, state, stopping_strings=None, is_chat=False, escap
 
                 last_update = time.time()
                 yield reply
-
-            # Limit updates to avoid lag in the Gradio UI
-            # API updates are not limited
             else:
-                if cur_time - last_update > min_update_interval:
-                    last_update = cur_time
-                    yield reply
+                yield reply
 
         if stop_found or (state['max_tokens_second'] > 0 and shared.stop_everything):
             break
@@ -122,7 +118,7 @@ def encode(prompt, add_special_tokens=True, add_bos_token=True, truncation_lengt
     if shared.tokenizer is None:
         raise ValueError('No tokenizer is loaded')
 
-    if shared.model.__class__.__name__ in ['LlamaCppModel', 'CtransformersModel', 'Exllamav2Model']:
+    if shared.model.__class__.__name__ in ['LlamaCppModel', 'Exllamav2Model']:
         input_ids = shared.tokenizer.encode(str(prompt))
         if shared.model.__class__.__name__ not in ['Exllamav2Model']:
             input_ids = np.array(input_ids).reshape(1, len(input_ids))
@@ -136,15 +132,18 @@ def encode(prompt, add_special_tokens=True, add_bos_token=True, truncation_lengt
     if truncation_length is not None:
         input_ids = input_ids[:, -truncation_length:]
 
-    if shared.model.__class__.__name__ in ['LlamaCppModel', 'Exllamav2Model', 'CtransformersModel'] or shared.args.cpu:
+    if shared.model.__class__.__name__ in ['LlamaCppModel', 'Exllamav2Model'] or shared.args.cpu:
         return input_ids
     elif shared.args.deepspeed:
-        return input_ids.to(device=local_rank)
+        import deepspeed
+        return input_ids.to(deepspeed.get_accelerator().current_device_name())
     elif torch.backends.mps.is_available():
         device = torch.device('mps')
         return input_ids.to(device)
     elif is_torch_xpu_available():
         return input_ids.to("xpu:0")
+    elif is_torch_npu_available():
+        return input_ids.to("npu:0")
     else:
         return input_ids.cuda()
 
@@ -194,23 +193,7 @@ def generate_reply_wrapper(question, state, stopping_strings=None):
 
 
 def formatted_outputs(reply, model_name):
-    if any(s in model_name for s in ['gpt-4chan', 'gpt4chan']):
-        reply = fix_gpt4chan(reply)
-        return html.unescape(reply), generate_4chan_html(reply)
-    else:
-        return html.unescape(reply), generate_basic_html(reply)
-
-
-def fix_gpt4chan(s):
-    """
-    Removes empty replies from gpt4chan outputs
-    """
-    for i in range(10):
-        s = re.sub("--- [0-9]*\n>>[0-9]*\n---", "---", s)
-        s = re.sub("--- [0-9]*\n *\n---", "---", s)
-        s = re.sub("--- [0-9]*\n\n\n---", "---", s)
-
-    return s
+    return html.unescape(reply), generate_basic_html(reply)
 
 
 def fix_galactica(s):
@@ -237,6 +220,8 @@ def set_manual_seed(seed):
         torch.cuda.manual_seed_all(seed)
     elif is_torch_xpu_available():
         torch.xpu.manual_seed_all(seed)
+    elif is_torch_npu_available():
+        torch.npu.manual_seed_all(seed)
 
     return seed
 
@@ -287,7 +272,7 @@ def get_reply_from_output_ids(output_ids, state=None, starting_from=0):
 
 def generate_reply_HF(question, original_question, seed, state, stopping_strings=None, is_chat=False):
     generate_params = {}
-    for k in ['max_new_tokens', 'temperature', 'temperature_last', 'dynamic_temperature', 'dynatemp_low', 'dynatemp_high', 'dynatemp_exponent', 'smoothing_factor', 'smoothing_curve', 'top_p', 'min_p', 'top_k', 'repetition_penalty', 'presence_penalty', 'frequency_penalty', 'repetition_penalty_range', 'typical_p', 'tfs', 'top_a', 'guidance_scale', 'penalty_alpha', 'mirostat_mode', 'mirostat_tau', 'mirostat_eta', 'do_sample', 'encoder_repetition_penalty', 'no_repeat_ngram_size', 'min_length', 'num_beams', 'length_penalty', 'early_stopping']:
+    for k in ['max_new_tokens', 'temperature', 'temperature_last', 'dynamic_temperature', 'dynatemp_low', 'dynatemp_high', 'dynatemp_exponent', 'smoothing_factor', 'smoothing_curve', 'top_p', 'min_p', 'top_k', 'repetition_penalty', 'presence_penalty', 'frequency_penalty', 'repetition_penalty_range', 'typical_p', 'tfs', 'top_a', 'guidance_scale', 'penalty_alpha', 'mirostat_mode', 'mirostat_tau', 'mirostat_eta', 'do_sample', 'encoder_repetition_penalty', 'no_repeat_ngram_size']:
         if k in state:
             generate_params[k] = state[k]
 

@@ -8,7 +8,7 @@ from pathlib import Path
 import gradio as gr
 import psutil
 import torch
-from transformers import is_torch_xpu_available
+from transformers import is_torch_npu_available, is_torch_xpu_available
 
 from modules import loaders, shared, ui, utils
 from modules.logging_colors import logger
@@ -32,6 +32,9 @@ def create_ui():
     if is_torch_xpu_available():
         for i in range(torch.xpu.device_count()):
             total_mem.append(math.floor(torch.xpu.get_device_properties(i).total_memory / (1024 * 1024)))
+    elif is_torch_npu_available():
+        for i in range(torch.npu.device_count()):
+            total_mem.append(math.floor(torch.npu.get_device_properties(i).total_memory / (1024 * 1024)))
     else:
         for i in range(torch.cuda.device_count()):
             total_mem.append(math.floor(torch.cuda.get_device_properties(i).total_memory / (1024 * 1024)))
@@ -75,7 +78,7 @@ def create_ui():
         with gr.Row():
             with gr.Column():
                 shared.gradio['loader'] = gr.Dropdown(label="Model loader", choices=loaders.loaders_and_params.keys(), value=None)
-                with gr.Box():
+                with gr.Blocks():
                     with gr.Row():
                         with gr.Column():
                             with gr.Blocks():
@@ -287,6 +290,12 @@ def download_model_wrapper(repo_id, specific_file, progress=gr.Progress(), retur
 
         yield ("Getting the output folder")
         output_folder = downloader.get_output_folder(model, branch, is_lora, is_llamacpp=is_llamacpp)
+
+        if output_folder == Path("models"):
+            output_folder = Path(shared.args.model_dir)
+        elif output_folder == Path("loras"):
+            output_folder = Path(shared.args.lora_dir)
+
         if check:
             progress(0.5)
 
@@ -330,7 +339,7 @@ def update_truncation_length(current_length, state):
     if 'loader' in state:
         if state['loader'].lower().startswith('exllama'):
             return state['max_seq_len']
-        elif state['loader'] in ['llama.cpp', 'llamacpp_HF', 'ctransformers']:
+        elif state['loader'] in ['llama.cpp', 'llamacpp_HF']:
             return state['n_ctx']
 
     return current_length
